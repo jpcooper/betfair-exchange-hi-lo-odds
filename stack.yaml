@@ -1,0 +1,9 @@
+resolver: "lts-16.16"
+
+packages:
+- .
+
+extra-deps:
+  - table-layout-0.9.0.1
+  - data-default-instances-base-0.1.0.1
+  - ncurses-0.2.16

@@ -1,0 +1,65 @@
+name:                betfair-exchange-hi-lo-odds
+version:             0.1.0.0
+
+default-extensions:
+  - NoImplicitPrelude
+  - RecordWildCards
+
+ghc-options:
+  - -Wall
+  - -Werror
+  - -fhelpful-errors
+
+dependencies:
+  - base >= 4.7 && < 5
+  - xml-conduit
+  - bytestring
+  - text
+  - containers
+  - directory
+  - vector
+  - Decimal
+  - wreq
+  - lens
+  - ncurses
+  - transformers
+  - table-layout
+  - data-default-class
+
+library:
+  source-dirs: src
+  c-sources:
+    - c/prob.h
+    - c/prob.c
+
+executables:
+  betfair-exe:
+    main:                Main.hs
+    source-dirs:
+      - app/common
+      - app/betfair-exe
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - betfair-exchange-hi-lo-odds
+    - bytestring
+    - temporary
+    - time
+    - filepath
+
+  betfair-from-stdin:
+    main:                Main.hs
+    source-dirs:
+      - app/common
+      - app/betfair-from-stdin
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - betfair-exchange-hi-lo-odds
+    - temporary
+    - time
+    - filepath
