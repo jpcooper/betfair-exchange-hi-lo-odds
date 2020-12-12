@@ -48,7 +48,10 @@ import Betfair.Model.Game (Amount(Amount),
                            getOdds)
 
 maxLoss :: Rational
-maxLoss = 5
+maxLoss = 10
+
+marketBaseRate :: Rational
+marketBaseRate = 0.065
 
 data DumbState = DumbState (Maybe (Round, MarketId))
   deriving Eq
@@ -86,6 +89,7 @@ dumb game odds = do
                 isPositiveExpectedValue =
                   product [recip realOdds,
                            fromIntegral $ 100 * margin,
+                           1 - marketBaseRate,
                            amount] >= 0.01
 
         makeBet (Selection selectionId _ toBack _, realOdds) =
