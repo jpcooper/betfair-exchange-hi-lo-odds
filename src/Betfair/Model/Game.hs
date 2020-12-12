@@ -8,21 +8,30 @@ module Betfair.Model.Game
   , Selection(Selection)
   , MarketId(MarketId)
   , MarketStatus(Active, Settled, SuspendedGameRoundOver, SuspendedGameSettling)
+  , Round(Round)
+  , SelectionId(SelectionId)
   , SelectionStatus(InPlay, Winner)
   , formatOdds
+  , formatRational
   , fromPlayedCards
+  , getAmount
+  , getMarketId
   , getNumberLower
   , getNumberRemaining
+  , getRound
+  , getOdds
   , remaining
   , lastPlayed
   , toBack
   , toLay
   , marketId
+  , round
   , windowTime
   , windowPercentageComplete
   , board
   , selections
   , marketStatus
+  , selectionId
   , selectionStatus
   ) where
 
@@ -104,7 +113,8 @@ instance Enum Card where
   toEnum _ = undefined
 
 data Game = Game
-  { marketId :: MarketId
+  { round :: Round
+  , marketId :: MarketId
   , windowTime :: Int
   , windowPercentageComplete :: Int
   , marketStatus :: MarketStatus
@@ -116,6 +126,7 @@ data MarketStatus = Active
                   | SuspendedGameRoundOver
                   | SuspendedGameSettling
                   | Settled
+  deriving Eq
 
 instance Show MarketStatus where
   show Active = "ACTIVE"
@@ -123,8 +134,11 @@ instance Show MarketStatus where
   show SuspendedGameSettling = "SUSPENDED_GAME_SETTLING"
   show Settled = "SETTLED"
 
-newtype MarketId = MarketId Text
-  deriving Show
+newtype Round = Round {getRound :: Int}
+  deriving (Eq, Show)
+
+newtype MarketId = MarketId {getMarketId :: Text}
+  deriving (Eq, Show)
 
 data Board = NoCards
            | Cards { remaining :: Set Card, lastPlayed :: Card }
@@ -159,14 +173,18 @@ newtype Amount = Amount Rational
 instance Show Amount where
   show (Amount amount) = formatRational amount 0
 
-data OddsAmount = OddsAmount Odds Amount
+data OddsAmount = OddsAmount {getOdds :: Odds, getAmount :: Amount}
 
 instance Show OddsAmount where
   show (OddsAmount odds amount) =
     show odds ++ ":" ++ show amount
 
+newtype SelectionId = SelectionId String
+  deriving Show
+
 data Selection = Selection
-  { selectionStatus :: SelectionStatus
+  { selectionId :: SelectionId
+  , selectionStatus :: SelectionStatus
   , toBack :: [OddsAmount]
   , toLay :: [OddsAmount]
   }

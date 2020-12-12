@@ -3,19 +3,28 @@
 
 module Main where
 
-import           Prelude (IO,
+import           Prelude (Bool(False),
+                          IO,
                           FilePath,
-                          Maybe(..),
+                          Integer,
                           String,
+                          (++),
                           (>>=),
                           (<),
                           (||),
+                          (-),
+                          div,
                           error,
-                          fromIntegral)
+                          max,
+                          fromIntegral,
+                          show)
 
 import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever, return)
+import           Control.Monad (forever, mapM, return)
 import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.State.Lazy (StateT, lift, evalStateT)
+import           Control.Monad.IO.Class (MonadIO)
+import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import           Data.Function (($))
 import           Data.List (length, maximum, map, lines)
 import           UI.NCurses
@@ -33,64 +42,114 @@ import           UI.NCurses
   , setCursorMode
   )
 import qualified UI.NCurses as NCurses (drawString)
+import           System.CPUTime (getCPUTime)
 import           System.Environment (getArgs)
 import           System.Directory (doesDirectoryExist)
 
-import           Betfair.Formatting (formatGameAndOdds)
-import           Betfair.IO (getGame)
+import           Betfair.Controller.Controller (Command(BetActions))
+import           Betfair.Controller.Dumb (DumbState, dumb, emptyDumbState)
+import           Betfair.Formatting (formatCommands, formatGameAndOdds)
+import           Betfair.IO (Login(Login), getGame, postOrder)
 import           Betfair.Logging (addToLog)
-import           Betfair.Model.Game.Parsing (parseGame)
+import           Betfair.Model.Game (Game)
+import           Betfair.Model.Game.Parsing (parseGame, formatCommand)
 import           Betfair.Wrapper (getOdds)
 
-gameUrl :: String
-gameUrl = "https://api.games.betfair.com/rest/v1/channels/1444093/snapshot?selectionsType=CorrectPredictions"
+picosecondsInMilliseconds :: Integer
+picosecondsInMilliseconds = 1000000000
+
+picosecondsInNanoseconds :: Integer
+picosecondsInNanoseconds = 1000
 
 main :: IO ()
 main = do
-  maybeLogDirectory <- getLogDirectory
   runCurses $ do
     _ <- setCursorMode CursorInvisible
-    forever $ do
-      displayOdds maybeLogDirectory
-      liftIO $ threadDelay 1000000
+    evalStateT run emptyDumbState
 
-getLogDirectory :: IO (Maybe String)
-getLogDirectory = getArgs >>= handle
-  where handle [logDirectory] = do
+  where run = do
+          (logDirectory, login) <- liftIO getLogDirectoryAndLogin
+          forever $ do
+            (displayDuration, _) <- timePicoseconds $
+              displayOdds logDirectory login
+            let displayDurationInNanoseconds =
+                  div displayDuration picosecondsInNanoseconds
+            liftIO $
+              threadDelay $
+              max 0 (1000000 - fromIntegral displayDurationInNanoseconds)
+
+timePicoseconds :: MonadIO m => m a -> m (Integer, a)
+timePicoseconds action = do
+  start <- liftIO $ getCPUTime
+  result <- action
+  end <- liftIO $ getCPUTime
+  return (end - start, result)
+
+getLogDirectoryAndLogin :: IO (FilePath, Login)
+getLogDirectoryAndLogin = getArgs >>= handle
+  where handle [logDirectory, username, password] = do
           doesDirectoryExistResult <- doesDirectoryExist logDirectory
           if doesDirectoryExistResult
-            then return $ Just logDirectory
-            else error "Given log directory does not exist."
+          then return $ (logDirectory, Login username password)
+          else error "Given log directory does not exist."
         handle _ =
-          return Nothing
+          error "Incorrect number of command line arguments."
 
-displayOdds :: Maybe FilePath -> Curses ()
-displayOdds maybeLogDirectory =
-  do gameResponse <- liftIO $ getGame gameUrl
+runCommands :: Login -> Game -> [Command] -> IO [Lazy.ByteString]
+runCommands login game commands =
+  mapM executeCommand commands
+
+  where executeCommand command@(BetActions _) =
+          postOrder login $ formatCommand isFormatPretty game command
+
+          where isFormatPretty = False
+
+displayOdds :: FilePath -> Login -> StateT DumbState Curses ()
+displayOdds logDirectory login =
+  do (getResponseDuration, gameResponse) <-
+       liftIO $ timePicoseconds getGame
      let game = parseGame gameResponse
-     stringToDraw <- liftIO $ getStringToDraw gameResponse game
+     odds <- liftIO $ getOdds game
+     commands <- dumb game odds
+     commandRunResults <- liftIO $ runCommands login game commands
+     stringToDraw <- liftIO $
+       getStringToDraw
+         gameResponse
+         game
+         odds
+         commands
+         commandRunResults
+         getResponseDuration
      let update = drawString stringToDraw
-     window <- defaultWindow
-     _ <- updateWindow window update
-     render
+     window <- lift defaultWindow
+     _ <- lift $ updateWindow window update
+     lift render
 
-  where getStringToDraw gameResponse game =
-          do odds <- liftIO $ getOdds game
-             let formattedOdds = formatGameAndOdds game odds
+  where getStringToDraw
+          gameResponse
+          game
+          odds
+          commands
+          commandRunResults
+          getResponseDuration =
 
-             case maybeLogDirectory of
-               Just logDirectory ->
-                 liftIO $ addToLog
-                  logDirectory
-                  gameResponse
-                  game
-                  odds
-                  formattedOdds
+          do let formattedOdds = formatGameAndOdds game odds
+             let formattedCommands = formatCommands game commands
+             let formattedGetResponseDuration =
+                   show (div getResponseDuration picosecondsInMilliseconds)
+             let stringToDraw =
+                   formattedOdds ++ "\n\n" ++
+                   formattedCommands ++ "\n\n" ++
+                   formattedGetResponseDuration
+             liftIO $ addToLog
+               logDirectory
+               gameResponse
+               game
+               odds
+               stringToDraw
+               commandRunResults
 
-               Nothing ->
-                 return ()
-
-             return formattedOdds
+             return stringToDraw
 
 drawString :: String -> Update ()
 drawString string =

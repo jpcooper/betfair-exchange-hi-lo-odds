@@ -1,13 +1,20 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Betfair.Model.Game.Parsing where
 
-import           Prelude (String,
+import           Prelude (Int,
+                          String,
                           Rational,
+                          Maybe(Just, Nothing),
+                          Bool,
                           error,
                           fst,
                           head,
+                          map,
                           read,
+                          show,
                           toEnum)
 
 import           Control.Applicative ((<$>))
@@ -24,37 +31,58 @@ import           Numeric (readFloat)
 
 import           Text.XML
 import           Text.XML.Cursor
-import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy as Lazy
+import           Data.Text (pack)
 
+import           Betfair.Controller.Controller (BetAction(BetPlace),
+                                                Command(BetActions),
+                                                Side(Back, Lay))
 import           Betfair.Model.Game
-  ( Game
-  , Selection(Selection)
-  , Game(Game)
+  ( Selection(Selection)
+  , Game(Game, marketId, round)
   , MarketId(MarketId)
+  , Round(Round)
   , Amount(Amount)
   , OddsAmount(OddsAmount)
   , Odds(Odds)
   , MarketStatus(Active, Settled, SuspendedGameRoundOver, SuspendedGameSettling)
+  , SelectionId(SelectionId)
   , SelectionStatus(InPlay, Winner)
+  , getMarketId
+  , getRound
+  , formatRational
+  , formatOdds
   , fromPlayedCards
   )
 
+namespace :: Text
+namespace = "urn:betfair:games:api:v1"
+
 selectionsBack :: Name
-selectionsBack = "{urn:betfair:games:api:v1}bestAvailableToBackPrices"
+selectionsBack = qualifyName "bestAvailableToBackPrices"
 
 selectionsLay :: Name
-selectionsLay = "{urn:betfair:games:api:v1}bestAvailableToLayPrices"
+selectionsLay = qualifyName "bestAvailableToLayPrices"
 
 market :: Name
-market = "{urn:betfair:games:api:v1}market"
+market = qualifyName "market"
 
 bettingWindowTime :: Name
-bettingWindowTime = "{urn:betfair:games:api:v1}bettingWindowTime"
+bettingWindowTime = qualifyName "bettingWindowTime"
 
 bettingWindowPercentageComplete :: Name
-bettingWindowPercentageComplete = "{urn:betfair:games:api:v1}bettingWindowPercentageComplete"
+bettingWindowPercentageComplete = qualifyName "bettingWindowPercentageComplete"
 
-parseGame :: L.ByteString -> Game
+qualifyName :: Text -> Name
+qualifyName name = Name name (Just namespace) Nothing
+
+decimalPlaces :: Int
+decimalPlaces = 2
+
+currency :: Text
+currency = "EUR"
+
+parseGame :: Lazy.ByteString -> Game
 parseGame byteString =
   case parseGames of
     [singleGame] ->
@@ -67,14 +95,16 @@ parseGame byteString =
         cursor = fromDocument document
 
         parseGames =
-          do gameElement <- cursor $// element "{urn:betfair:games:api:v1}game"
+          do gameElement <- cursor $// element (qualifyName "game")
              (bettingWindowTimeValue, bettingWindowPercentageCompleteValue) <- parseBettingWindow gameElement
 
              marketElement <- gameElement $// element market
+             roundElement <- gameElement $// element (qualifyName "round")
+             round <- (Round . read . unpack) <$> (roundElement $/ content)
              marketId <- MarketId <$> attribute "id" marketElement
-             statusText <- marketElement $/ element "{urn:betfair:games:api:v1}status" >=> ($/ content)
+             statusText <- marketElement $/ element (qualifyName "status") >=> ($/ content)
              let cardList = parseCardList gameElement
-             let constructor = Game marketId bettingWindowTimeValue bettingWindowPercentageCompleteValue
+             let constructor = Game round marketId bettingWindowTimeValue bettingWindowPercentageCompleteValue
 
              return $ case parseMarketStatus statusText of
                Active ->
@@ -92,24 +122,30 @@ parseGame byteString =
           where readText = fmap (read . unpack)
 
         parseCardList gameElement =
-          do board <- gameElement $// element "{urn:betfair:games:api:v1}object"
-             property <- board $/ element "{urn:betfair:games:api:v1}property"
+          do board <- gameElement $// element (qualifyName "object")
+             property <- board $/ element (qualifyName "property")
              valueString <- attribute "value" property
              return . toEnum . read $ unpack valueString
 
         selectionList marketElement =
-          do selectionsObject <- marketElement $/ element "{urn:betfair:games:api:v1}selections"
-             selection <- selectionsObject $/ element "{urn:betfair:games:api:v1}selection"
-             statusText <- selection $/ element "{urn:betfair:games:api:v1}status" >=> ($/ content)
+          do selectionsObject <- marketElement $/ element (qualifyName "selections")
+             selection <- selectionsObject $/ element (qualifyName "selection")
+             statusText <- selection $/ element (qualifyName "status") >=> ($/ content)
+             selectionId <- attribute "id" selection
+             let selectionIdString = unpack selectionId
              let selectionStatus = parseSelectionStatus statusText
              let backSelections = prices selectionsBack selection
              let laySelections = prices selectionsLay selection
 
-             return $ Selection selectionStatus backSelections laySelections
+             return $ Selection
+               (SelectionId selectionIdString)
+               selectionStatus
+               backSelections
+               laySelections
 
         prices name selectionCursor =
           do oddsPrices <- selectionCursor $/ element name
-             oddsPriceElement <- oddsPrices $/ element "{urn:betfair:games:api:v1}price"
+             oddsPriceElement <- oddsPrices $/ element (qualifyName "price")
              oddsString <- oddsPriceElement $/ content
              priceString <- attribute "amountUnmatched" oddsPriceElement
              return $ OddsAmount (Odds $ readRational $ unpack oddsString) (Amount $ readRational $ unpack priceString)
@@ -144,3 +180,58 @@ parseSelectionStatus statusText = case statusText of
 
 readRational :: String -> Rational
 readRational = fst . head . readFloat
+
+bidTypeElement :: Side -> Element
+bidTypeElement side =
+  Element "bidType" [] [NodeContent sideText]
+
+  where sideText = case side of
+          Back ->
+            "BACK"
+
+          Lay ->
+            "LAY"
+
+betActionToXMLElement :: BetAction -> Element
+betActionToXMLElement
+  (BetPlace
+     (SelectionId thisSelectionId)
+     thisSide
+     (OddsAmount
+        thisOdds
+        (Amount thisAmount))) =
+  Element "betPlace" [] $ map NodeElement
+                [bidTypeElement thisSide,
+                 priceElement,
+                 sizeElement,
+                 selectionIdElement]
+
+  where priceElement =
+          Element "price" [] $
+            [NodeContent $ pack $ formatOdds thisOdds decimalPlaces]
+
+        sizeElement =
+          Element "size" [] $
+            [NodeContent $ pack $ formatRational thisAmount decimalPlaces]
+
+        selectionIdElement =
+          Element "selectionId" [] $
+            [NodeContent $ pack thisSelectionId]
+
+-- Bool for whether to format pretty
+formatCommand :: Bool -> Game -> Command -> Lazy.ByteString
+formatCommand isFormatPretty (Game {..}) command =
+  case command of
+     BetActions bets->
+      renderLBS (def {rsPretty = isFormatPretty}) document
+
+      where document = Document prologue root epilogue
+            prologue = Prologue [] Nothing []
+            epilogue = []
+            root =
+              Element "postBetOrder"
+                [("xmlns", namespace),
+                 ("marketId", getMarketId marketId),
+                 ("round", pack $ show $ getRound round),
+                 ("currency", currency)] $
+                map (NodeElement . betActionToXMLElement) bets

@@ -11,20 +11,25 @@ ghc-options:
   - -fhelpful-errors
 
 dependencies:
-  - base >= 4.7 && < 5
-  - xml-conduit
-  - bytestring
-  - text
-  - containers
-  - directory
-  - vector
   - Decimal
-  - wreq
-  - lens
-  - ncurses
-  - transformers
-  - table-layout
+  - base >= 4.7 && < 5
+  - bytestring
+  - case-insensitive
+  - connection
+  - containers
   - data-default-class
+  - directory
+  - http-client
+  - http-client-tls
+  - lens
+  - mtl
+  - ncurses
+  - table-layout
+  - text
+  - transformers
+  - vector
+  - wreq
+  - xml-conduit
 
 library:
   source-dirs: src
@@ -45,6 +50,7 @@ executables:
     dependencies:
     - betfair-exchange-hi-lo-odds
     - bytestring
+    - mtl
     - temporary
     - time
     - filepath

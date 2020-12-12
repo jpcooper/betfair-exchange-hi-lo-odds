@@ -2,7 +2,7 @@
 
 module Betfair.Logging (addToLog) where
 
-import           Prelude (FilePath, String, IO, show)
+import           Prelude (FilePath, String, IO, (++), show)
 
 import           Data.ByteString.Lazy (ByteString, appendFile, writeFile)
 import qualified Data.ByteString.Lazy as ByteString (intercalate)
@@ -15,21 +15,33 @@ import           System.IO.Temp (emptyTempFile)
 
 import           Betfair.Model.Game (Game, Odds)
 
-addToLog :: FilePath -> ByteString -> Game -> [Odds] -> String -> IO ()
-addToLog logDirectory gameResponse game odds formattedProbabilities =
+addToLog :: FilePath
+         -> ByteString
+         -> Game
+         -> [Odds]
+         -> String
+         -> [ByteString]
+         -> IO ()
+addToLog
+  logDirectory
+  gameResponse
+  game
+  odds
+  formattedProbabilities
+  commandRunResults =
   do responsePath <- getResponsePath
      writeFile responsePath gameResponse
      appendFile (logDirectory </> logFile) $ logLine responsePath
 
   where logLine responsePath =
           ByteString.intercalate "\n\n"
-            [ fromString responsePath
-            , gameResponse
-            , fromString $ show game
-            , fromString $ show odds
-            , fromString formattedProbabilities
-            , separator
-            ]
+            ([ fromString responsePath
+             , gameResponse
+             , fromString $ show game
+             , fromString $ show odds
+             , fromString formattedProbabilities] ++
+             commandRunResults ++
+             [separator])
         separator = "---\n\n"
         logFile = "log"
         getResponsePath =
