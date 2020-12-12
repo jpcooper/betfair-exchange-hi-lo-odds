@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Betfair.IO (Login(Login), getGame, postOrder) where
+module Betfair.IO (Login(Login), buildManagerSettings, getGame, postOrder) where
 
-import Prelude (IO, Maybe(..), String, ($), error)
+import Prelude (Bool, IO, Maybe(..), String, ($), error)
 
 import Control.Lens ((^.), (&), (.~))
 import Control.Monad (return)
@@ -61,18 +61,26 @@ apiAgentInstance = "d8e8fca2dc0f896fd7cb4cb0031ba249"
 proxySettings :: ProxySettings
 proxySettings = SockSettingsSimple "localhost" 8000
 
-managerSettings :: ManagerSettings
-managerSettings = mkManagerSettings def $ Just proxySettings
+buildManagerSettings :: Bool -> ManagerSettings
+buildManagerSettings useProxy =
+  mkManagerSettings def $
+    if useProxy
+    then Just proxySettings
+    else Nothing
 
-getGame :: IO Lazy.ByteString
-getGame = do
-  response <- getWith (buildOptions Nothing) gameUrl
+getGame :: ManagerSettings -> IO Lazy.ByteString
+getGame managerSettings = do
+  response <- getWith options gameUrl
   return $ extractSuccessfulBody response
 
-postOrder :: Login -> Lazy.ByteString -> IO Lazy.ByteString
-postOrder login body = do
-  response <- postWith (buildOptions $ Just login) orderUrl body
+  where options = buildOptions managerSettings Nothing
+
+postOrder :: ManagerSettings -> Login -> Lazy.ByteString -> IO Lazy.ByteString
+postOrder managerSettings login body = do
+  response <- postWith options orderUrl body
   return $ extractSuccessfulBody response
+
+  where options = buildOptions managerSettings $ Just login
 
 extractSuccessfulBody :: Response Lazy.ByteString -> Lazy.ByteString
 extractSuccessfulBody response =
@@ -86,8 +94,8 @@ extractSuccessfulBody response =
   where body = response ^. responseBody
         responseCode = response ^. responseStatus . statusCode
 
-buildOptions :: Maybe Login -> Options
-buildOptions maybeLogin =
+buildOptions :: ManagerSettings -> Maybe Login -> Options
+buildOptions managerSettings maybeLogin =
   case maybeLogin of
     Nothing ->
       withManager

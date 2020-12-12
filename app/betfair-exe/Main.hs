@@ -16,6 +16,7 @@ import           Prelude (Bool(False),
                           div,
                           error,
                           max,
+                          read,
                           fromIntegral,
                           show)
 
@@ -42,6 +43,7 @@ import           UI.NCurses
   , setCursorMode
   )
 import qualified UI.NCurses as NCurses (drawString)
+import           Network.HTTP.Client (ManagerSettings)
 import           System.CPUTime (getCPUTime)
 import           System.Environment (getArgs)
 import           System.Directory (doesDirectoryExist)
@@ -49,7 +51,10 @@ import           System.Directory (doesDirectoryExist)
 import           Betfair.Controller.Controller (Command(BetActions))
 import           Betfair.Controller.Dumb (DumbState, dumb, emptyDumbState)
 import           Betfair.Formatting (formatCommands, formatGameAndOdds)
-import           Betfair.IO (Login(Login), getGame, postOrder)
+import           Betfair.IO (Login(Login),
+                             buildManagerSettings,
+                             getGame,
+                             postOrder)
 import           Betfair.Logging (addToLog)
 import           Betfair.Model.Game (Game)
 import           Betfair.Model.Game.Parsing (parseGame, formatCommand)
@@ -68,10 +73,10 @@ main = do
     evalStateT run emptyDumbState
 
   where run = do
-          (logDirectory, login) <- liftIO getLogDirectoryAndLogin
+          (logDirectory, login, useProxy) <- liftIO getConfiguration
           forever $ do
             (displayDuration, _) <- timePicoseconds $
-              displayOdds logDirectory login
+              displayOdds logDirectory login $ buildManagerSettings useProxy
             let displayDurationInNanoseconds =
                   div displayDuration picosecondsInNanoseconds
             liftIO $
@@ -85,33 +90,33 @@ timePicoseconds action = do
   end <- liftIO $ getCPUTime
   return (end - start, result)
 
-getLogDirectoryAndLogin :: IO (FilePath, Login)
-getLogDirectoryAndLogin = getArgs >>= handle
-  where handle [logDirectory, username, password] = do
+getConfiguration :: IO (FilePath, Login, Bool)
+getConfiguration = getArgs >>= handle
+  where handle [logDirectory, username, password, useProxy] = do
           doesDirectoryExistResult <- doesDirectoryExist logDirectory
           if doesDirectoryExistResult
-          then return $ (logDirectory, Login username password)
+          then return $ (logDirectory, Login username password, read useProxy)
           else error "Given log directory does not exist."
         handle _ =
           error "Incorrect number of command line arguments."
 
-runCommands :: Login -> Game -> [Command] -> IO [Lazy.ByteString]
-runCommands login game commands =
+runCommands :: Login -> ManagerSettings -> Game -> [Command] -> IO [Lazy.ByteString]
+runCommands login managerSettings game commands =
   mapM executeCommand commands
 
   where executeCommand command@(BetActions _) =
-          postOrder login $ formatCommand isFormatPretty game command
+          postOrder managerSettings login $ formatCommand isFormatPretty game command
 
           where isFormatPretty = False
 
-displayOdds :: FilePath -> Login -> StateT DumbState Curses ()
-displayOdds logDirectory login =
+displayOdds :: FilePath -> Login -> ManagerSettings -> StateT DumbState Curses ()
+displayOdds logDirectory login managerSettings =
   do (getResponseDuration, gameResponse) <-
-       liftIO $ timePicoseconds getGame
+       liftIO $ timePicoseconds $ getGame managerSettings
      let game = parseGame gameResponse
      odds <- liftIO $ getOdds game
      commands <- dumb game odds
-     commandRunResults <- liftIO $ runCommands login game commands
+     commandRunResults <- liftIO $ runCommands login managerSettings game commands
      stringToDraw <- liftIO $
        getStringToDraw
          gameResponse
