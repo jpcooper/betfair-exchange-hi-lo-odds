@@ -1,10 +1,10 @@
 module Betfair.Controller.Common (calculateMargin,
-                                  calculateCheapestOdds,
+                                  getMaxProfitableLayOdds,
+                                  getMaxSmallerOdds,
+                                  getMinGreaterOdds,
                                   zipSelectionsAndOdds) where
 
 import Prelude (Int,
-                Integer,
-                Maybe,
                 RealFrac,
                 Rational,
                 ($),
@@ -20,15 +20,17 @@ import Prelude (Int,
                 error,
                 filter,
                 floor,
-                fmap,
                 fromIntegral,
                 fst,
                 head,
                 map,
+                max,
+                recip,
                 snd,
                 zip)
 
-import Betfair.Model.Game (Odds(Odds),
+import Betfair.Model.Game (Amount(Amount),
+                           Odds(Odds),
                            Selection(..),
                            SelectionStatus(..))
 
@@ -57,49 +59,72 @@ oddsIncrements =
 toPips :: RealFrac a => a -> Int
 toPips a = floor (a * 100)
 
--- What are the margins of the available odds to relative to the
--- minimum and maximum possible odds on either side of the real odds?
-calculateMargin :: Odds -> Maybe Odds -> Maybe Odds -> (Maybe Int, Maybe Int)
-calculateMargin realOdds maxAvailableBack minAvailableLay =
-  (backMargin, layMargin)
+marketBaseRate :: Rational
+marketBaseRate = 0.065
 
-  where (Odds maxPossibleBack, Odds minPossibleLay) = calculateCheapestOdds realOdds
-        getOdds (Odds theseOdds) = theseOdds
-        backMargin = fmap (toPips . (maxPossibleBack -) . getOdds) maxAvailableBack
-        subtractLay :: Rational -> Rational
-        subtractLay x = (x - minPossibleLay)
-        layMargin = fmap (toPips . subtractLay . getOdds) minAvailableLay
+-- What are the margins of the available back odds to relative to the
+-- maximum profitable lay odds?
+calculateMargin :: Amount -> Odds -> Odds -> Int
+calculateMargin maxLoss realOdds (Odds maxAvailableBack) =
+  toPips $ max 0 (maxProfitableLayOdds - maxAvailableBack)
 
--- Calculate the cheapest odds for back and lay which would make a
--- profit given the real odds of an outcome, basing this on the
--- increments as defined in `oddsIncrements`.
-calculateCheapestOdds :: Odds -> (Odds, Odds)
-calculateCheapestOdds (Odds realOdds) =
-  (Odds maxBackOdds, Odds minLayOdds)
+  where Odds maxProfitableLayOdds = getMaxProfitableLayOdds maxLoss realOdds
 
-  where -- Maximum odds less than realOdds which are a whole multiple
+getIncrement :: Odds -> Rational
+getIncrement (Odds odds) =
+  case filter ((odds <=) . fst) oddsIncrements of
+    [] ->
+      error "getIncrement: odds greater than max."
+
+    filtered ->
+      snd $ head filtered
+
+getMaxProfitableLayOdds :: Amount -> Odds -> Odds
+getMaxProfitableLayOdds (Amount maxLoss) (Odds realOdds) =
+  Odds (fromIntegral floored * incrementForRange)
+
+  where l = maxLoss
+        r = -0.05
+        s =  0.05
+        z = realOdds
+        betAmount = (l - s) / (z - 1)
+        a = betAmount
+        d = 1 - marketBaseRate
+        p = recip realOdds
+
+        x = a * (d - (d * p) + p)
+        y = p * (r + s)
+
+        approximateResult = (x - y + r - minimumIncrement) / (a * p)
+        incrementForRange = getIncrement (Odds approximateResult)
+        floored = floor (approximateResult / incrementForRange) :: Int
+
+getMaxSmallerOdds :: Odds -> Odds
+getMaxSmallerOdds (Odds realOdds) =
+  Odds (fromIntegral b * incrementForRange)
+
+  where -- Maximum odds less than odds which are a whole multiple
         -- of minimumIncrement
-        approximateMaxBackOdds =
-          fromIntegral (ceiling ((realOdds - minimumIncrement) / minimumIncrement) :: Integer) * minimumIncrement
+        a = ceiling ((realOdds - minimumIncrement) / minimumIncrement) :: Int
+        approximateResult =
+          fromIntegral a * minimumIncrement
 
-        -- Minimum odds greater than realOdds which are a whole
+        b = floor (approximateResult / incrementForRange) :: Int
+        incrementForRange = getIncrement (Odds approximateResult)
+
+getMinGreaterOdds :: Odds -> Odds
+getMinGreaterOdds (Odds realOdds) =
+  Odds (fromIntegral b * incrementForRange)
+
+  where -- Minimum odds greater than realOdds which are a whole
         -- multiple of minimumIncrement
-        approximateMinLayOdds =
-          fromIntegral (floor ((realOdds + minimumIncrement) / minimumIncrement) :: Integer) * minimumIncrement
-
-        backIncrement = getIncrement approximateMaxBackOdds
-        layIncrement = getIncrement approximateMinLayOdds
-
-        -- Maximum possible back odds which would be profitable
-        maxBackOdds =
-          fromIntegral (floor (approximateMaxBackOdds / backIncrement) :: Integer) * backIncrement
+        a = floor ((realOdds + minimumIncrement) / minimumIncrement) :: Int
+        approximateResult =
+          fromIntegral a * minimumIncrement
 
         -- Minimum possible lay odds which would be profitable
-        minLayOdds =
-          fromIntegral (ceiling (approximateMinLayOdds / layIncrement) :: Integer) * layIncrement
-
-        getIncrement odds =
-         snd $ head $ filter ((odds <=) . fst) oddsIncrements
+        b = ceiling (approximateResult / incrementForRange) :: Int
+        incrementForRange = getIncrement (Odds approximateResult)
 
 zipSelectionsAndOdds :: [Selection] -> [Odds] -> [(Selection, Odds)]
 zipSelectionsAndOdds selections odds =

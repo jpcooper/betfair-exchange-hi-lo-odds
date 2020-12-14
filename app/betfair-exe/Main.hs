@@ -48,9 +48,12 @@ import           System.CPUTime (getCPUTime)
 import           System.Environment (getArgs)
 import           System.Directory (doesDirectoryExist)
 
+import           Betfair.App.Common (maxLoss)
+import           Betfair.App.Common.Formatting (formatCommands, formatGameAndOdds)
+import           Betfair.App.Common.Wrapper (getOdds)
 import           Betfair.Controller.Controller (Command(BetActions))
 import           Betfair.Controller.Dumb (DumbState, dumb, emptyDumbState)
-import           Betfair.Formatting (formatCommands, formatGameAndOdds)
+import qualified Betfair.Controller.Dumb as Dumb (Configuration(..))
 import           Betfair.IO (Login(Login),
                              buildManagerSettings,
                              getGame,
@@ -58,13 +61,15 @@ import           Betfair.IO (Login(Login),
 import           Betfair.Logging (addToLog)
 import           Betfair.Model.Game (Game)
 import           Betfair.Model.Game.Parsing (parseGame, formatCommand)
-import           Betfair.Wrapper (getOdds)
 
 picosecondsInMilliseconds :: Integer
 picosecondsInMilliseconds = 1000000000
 
 picosecondsInNanoseconds :: Integer
 picosecondsInNanoseconds = 1000
+
+dumbConfiguration :: Dumb.Configuration
+dumbConfiguration = Dumb.Configuration maxLoss
 
 main :: IO ()
 main = do
@@ -74,9 +79,10 @@ main = do
 
   where run = do
           (logDirectory, login, useProxy) <- liftIO getConfiguration
+          let managerSettings = buildManagerSettings useProxy
           forever $ do
             (displayDuration, _) <- timePicoseconds $
-              displayOdds logDirectory login $ buildManagerSettings useProxy
+              displayOdds logDirectory login managerSettings
             let displayDurationInNanoseconds =
                   div displayDuration picosecondsInNanoseconds
             liftIO $
@@ -109,13 +115,16 @@ runCommands login managerSettings game commands =
 
           where isFormatPretty = False
 
-displayOdds :: FilePath -> Login -> ManagerSettings -> StateT DumbState Curses ()
+displayOdds :: FilePath
+            -> Login
+            -> ManagerSettings
+            -> StateT DumbState Curses ()
 displayOdds logDirectory login managerSettings =
   do (getResponseDuration, gameResponse) <-
        liftIO $ timePicoseconds $ getGame managerSettings
      let game = parseGame gameResponse
      odds <- liftIO $ getOdds game
-     commands <- dumb game odds
+     commands <- dumb dumbConfiguration game odds
      commandRunResults <- liftIO $ runCommands login managerSettings game commands
      stringToDraw <- liftIO $
        getStringToDraw
@@ -138,7 +147,7 @@ displayOdds logDirectory login managerSettings =
           commandRunResults
           getResponseDuration =
 
-          do let formattedOdds = formatGameAndOdds game odds
+          do let formattedOdds = formatGameAndOdds maxLoss game odds
              let formattedCommands = formatCommands game commands
              let formattedGetResponseDuration =
                    show (div getResponseDuration picosecondsInMilliseconds)

@@ -1,4 +1,4 @@
-module Betfair.Wrapper (getOdds) where
+module Betfair.App.Common.Wrapper (getOdds) where
 
 import Prelude (IO, Int, (==))
 

@@ -1,10 +1,10 @@
-module Betfair.Formatting (formatCommands, formatGameAndOdds) where
+module Betfair.App.Common.Formatting (formatCommands, formatGameAndOdds) where
 
 import Prelude (Bool(True),
                 Int,
                 String,
                 (.),
-                fmap,
+                (<$>),
                 maybe,
                 show)
 
@@ -25,7 +25,8 @@ import Text.Layout.Table.Spec.AlignSpec (charAlign)
 import Betfair.Controller.Common (calculateMargin, zipSelectionsAndOdds)
 import Betfair.Controller.Controller (Command)
 import Betfair.Model.Game
-  ( Game(Game)
+  ( Amount
+  , Game(Game)
   , Odds
   , OddsAmount(OddsAmount)
   , Selection(Selection)
@@ -40,32 +41,30 @@ decimalPlacesRealOdds :: Int
 decimalPlacesRealOdds = 3
 
 header :: [String]
-header = ["BACK", "", "", "MARGIN", "ODDS", "MARGIN", "LAY", "", ""]
+header = ["BACK", "", "", "MARGIN", "ODDS", "LAY", "", ""]
 
-formatGameAndOdds :: Game -> [Odds] -> String
-formatGameAndOdds Game {..} odds =
+formatGameAndOdds :: Amount -> Game -> [Odds] -> String
+formatGameAndOdds maxLoss Game {..} odds =
   unlines [show marketStatus, "\n", gridString (replicate (length header) colSpec) (header : rows)]
 
   where colSpec = column expand left (charAlign '.') def
         selectionsAndOdds = zipSelectionsAndOdds (toList selections) odds
-        rows = map (\(s, p) -> formatSelectionAndOdds s p) selectionsAndOdds
+        rows = map (\(s, o) -> formatSelectionAndOdds maxLoss s o) selectionsAndOdds
 
-formatSelectionAndOdds :: Selection -> Odds -> [String]
-formatSelectionAndOdds selection odds =
+formatSelectionAndOdds :: Amount -> Selection -> Odds -> [String]
+formatSelectionAndOdds maxLoss selection odds =
   showSelections (reverse toBack) ++
   [ formatMargin backMarginResult
   , formatOdds odds decimalPlacesRealOdds
-  , formatMargin layMarginResult
   ] ++
   showSelections toLay
 
   where Selection _ _ toBack toLay = selection
         showSelections = map show
         getOdds (OddsAmount theseOdds _) = theseOdds
-        backOdds = fmap getOdds $ listToMaybe toBack
-        layOdds = fmap getOdds $ listToMaybe toLay
-        (backMarginResult, layMarginResult) =
-          calculateMargin odds backOdds layOdds
+        backOdds = getOdds <$> listToMaybe toBack
+        backMarginResult =
+          calculateMargin maxLoss odds <$> backOdds
         formatMargin = maybe "X" show
 
 formatCommands :: Game -> [Command] -> String
