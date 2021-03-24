@@ -1,20 +1,20 @@
-module Betfair.Model.Game
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RecordWildCards #-}
+
+module Betfair.Game
   ( Card(..)
   , Game(Game)
   , Board(NoCards, Cards)
   , Odds(Odds)
-  , Amount(Amount)
-  , OddsAmount(OddsAmount)
+  , Amount(Amount, getAmount)
+  , OddsAmount(OddsAmount, getAmount)
   , Selection(Selection)
   , MarketId(MarketId)
   , MarketStatus(Active, Settled, SuspendedGameRoundOver, SuspendedGameSettling)
   , Round(Round)
   , SelectionId(SelectionId)
-  , SelectionStatus(InPlay, Winner)
-  , formatOdds
-  , formatRational
+  , SelectionStatus(InPlay, Winner, Loser)
   , fromPlayedCards
-  , getAmount
   , getMarketId
   , getNumberLower
   , getNumberRemaining
@@ -35,34 +35,13 @@ module Betfair.Model.Game
   , selectionStatus
   ) where
 
-import           Prelude
-  ( Show
-  , Enum
-  , Eq
-  , Ord
-  , Rational
-  , Int
-  , String
-  , (*)
-  , (==)
-  , fromEnum
-  , quotRem
-  , show
-  , shows
-  , take
-  , toEnum
-  , undefined
-  )
-
-import           Data.Function (($))
-import           Data.List ((++), last)
-import           Data.Ratio (denominator , numerator)
+import           Prelude hiding (round)
 
 import           Data.Set (Set)
 import qualified Data.Set as Set (difference, fromList, size, split)
 import           Data.Text (Text)
 
-import           Data.Vector (Vector)
+import           Betfair.Serialisation (formatRational)
 
 decimalPlacesOdds :: Int
 decimalPlacesOdds = 2
@@ -119,7 +98,7 @@ data Game = Game
   , windowPercentageComplete :: Int
   , marketStatus :: MarketStatus
   , board :: Board
-  , selections :: Vector Selection
+  , selections :: [Selection]
   } deriving Show
 
 data MarketStatus = Active
@@ -135,10 +114,10 @@ instance Show MarketStatus where
   show Settled = "SETTLED"
 
 newtype Round = Round {getRound :: Int}
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 newtype MarketId = MarketId {getMarketId :: Text}
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 data Board = NoCards
            | Cards { remaining :: Set Card, lastPlayed :: Card }
@@ -146,29 +125,10 @@ data Board = NoCards
 
 newtype Odds = Odds Rational
 
-formatRational :: Rational -> Int -> String
-formatRational rational decimalPlaces =
-  if decimalPlaces == 0
-  then show wholePart
-  else shows wholePart ("." ++ take decimalPlaces (go remainder))
-
-  where (wholePart, remainder) = num `quotRem` den
-        num = numerator rational
-        den = denominator rational
-
-        go 0 = '0' : go 0
-        go x = let (d, next) = (10 * x) `quotRem` den
-               in shows d (go next)
-
-
-formatOdds :: Odds -> Int -> String
-formatOdds (Odds odds) decimalPlaces =
-  formatRational odds decimalPlaces
-
 instance Show Odds where
   show (Odds odds) = formatRational odds decimalPlacesOdds
 
-newtype Amount = Amount Rational
+newtype Amount = Amount {getAmount :: Rational}
 
 instance Show Amount where
   show (Amount amount) = formatRational amount 0
@@ -180,7 +140,7 @@ instance Show OddsAmount where
     show odds ++ ":" ++ show amount
 
 newtype SelectionId = SelectionId String
-  deriving Show
+  deriving (Eq, Ord, Show)
 
 data Selection = Selection
   { selectionId :: SelectionId
@@ -192,6 +152,7 @@ data Selection = Selection
 
 data SelectionStatus = InPlay
                      | Winner
+                     | Loser
   deriving (Eq, Show)
 
 allCards :: Set Card

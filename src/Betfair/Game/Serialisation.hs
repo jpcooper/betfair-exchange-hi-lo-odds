@@ -2,44 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Betfair.Model.Game.Parsing where
+module Betfair.Game.Serialisation where
 
-import           Prelude (Int,
-                          String,
-                          Rational,
-                          Maybe(Just, Nothing),
-                          Bool,
-                          error,
-                          fst,
-                          head,
-                          map,
-                          read,
-                          show,
-                          toEnum)
-
-import           Control.Applicative ((<$>))
-import           Control.Monad (return)
 import           Data.Decimal ()
-import           Data.Function ((.), ($))
-import           Data.Functor (fmap)
-import           Data.List ((++))
-
 import           Data.Text (Text, unpack)
-import qualified Data.Vector as Vector (fromList)
-
-import           Numeric (readFloat)
-
 import           Text.XML
 import           Text.XML.Cursor
 import qualified Data.ByteString.Lazy as Lazy
-import           Data.Text (pack)
 
-import           Betfair.Controller.Controller (BetAction(BetPlace),
-                                                Command(BetActions),
-                                                Side(Back, Lay))
-import           Betfair.Model.Game
+import           Betfair.Serialisation (formatRational, qualifyName, readRational)
+import           Betfair.Game
   ( Selection(Selection)
-  , Game(Game, marketId, round)
+  , Game(Game)
   , MarketId(MarketId)
   , Round(Round)
   , Amount(Amount)
@@ -47,16 +21,9 @@ import           Betfair.Model.Game
   , Odds(Odds)
   , MarketStatus(Active, Settled, SuspendedGameRoundOver, SuspendedGameSettling)
   , SelectionId(SelectionId)
-  , SelectionStatus(InPlay, Winner)
-  , getMarketId
-  , getRound
-  , formatRational
-  , formatOdds
+  , SelectionStatus(InPlay, Winner, Loser)
   , fromPlayedCards
   )
-
-namespace :: Text
-namespace = "urn:betfair:games:api:v1"
 
 selectionsBack :: Name
 selectionsBack = qualifyName "bestAvailableToBackPrices"
@@ -73,14 +40,8 @@ bettingWindowTime = qualifyName "bettingWindowTime"
 bettingWindowPercentageComplete :: Name
 bettingWindowPercentageComplete = qualifyName "bettingWindowPercentageComplete"
 
-qualifyName :: Text -> Name
-qualifyName name = Name name (Just namespace) Nothing
-
 decimalPlaces :: Int
 decimalPlaces = 2
-
-currency :: Text
-currency = "EUR"
 
 parseGame :: Lazy.ByteString -> Game
 parseGame byteString =
@@ -100,19 +61,15 @@ parseGame byteString =
 
              marketElement <- gameElement $// element market
              roundElement <- gameElement $// element (qualifyName "round")
-             round <- (Round . read . unpack) <$> (roundElement $/ content)
+             thisRound <- (Round . read . unpack) <$> (roundElement $/ content)
              marketId <- MarketId <$> attribute "id" marketElement
              statusText <- marketElement $/ element (qualifyName "status") >=> ($/ content)
              let cardList = parseCardList gameElement
-             let constructor = Game round marketId bettingWindowTimeValue bettingWindowPercentageCompleteValue
+             let constructor = Game thisRound marketId bettingWindowTimeValue bettingWindowPercentageCompleteValue
+             let marketStatus = parseMarketStatus statusText
+             let selections = selectionList marketElement
 
-             return $ case parseMarketStatus statusText of
-               Active ->
-                 let selections = Vector.fromList $ selectionList marketElement
-                 in constructor Active (fromPlayedCards cardList) selections
-
-               otherStatus ->
-                 constructor otherStatus (fromPlayedCards []) (Vector.fromList [])
+             return $ constructor marketStatus (fromPlayedCards cardList) selections
 
         parseBettingWindow gameElement =
           do a <- readText (gameElement $/ element bettingWindowTime >=> ($/ content))
@@ -175,63 +132,12 @@ parseSelectionStatus statusText = case statusText of
   "WINNER" ->
     Winner
 
+  "LOSER" ->
+    Loser
+
   otherStatus ->
     error ("Unknown selection status: " ++ unpack otherStatus)
 
-readRational :: String -> Rational
-readRational = fst . head . readFloat
-
-bidTypeElement :: Side -> Element
-bidTypeElement side =
-  Element "bidType" [] [NodeContent sideText]
-
-  where sideText = case side of
-          Back ->
-            "BACK"
-
-          Lay ->
-            "LAY"
-
-betActionToXMLElement :: BetAction -> Element
-betActionToXMLElement
-  (BetPlace
-     (SelectionId thisSelectionId)
-     thisSide
-     (OddsAmount
-        thisOdds
-        (Amount thisAmount))) =
-  Element "betPlace" [] $ map NodeElement
-                [bidTypeElement thisSide,
-                 priceElement,
-                 sizeElement,
-                 selectionIdElement]
-
-  where priceElement =
-          Element "price" [] $
-            [NodeContent $ pack $ formatOdds thisOdds decimalPlaces]
-
-        sizeElement =
-          Element "size" [] $
-            [NodeContent $ pack $ formatRational thisAmount decimalPlaces]
-
-        selectionIdElement =
-          Element "selectionId" [] $
-            [NodeContent $ pack thisSelectionId]
-
--- Bool for whether to format pretty
-formatCommand :: Bool -> Game -> Command -> Lazy.ByteString
-formatCommand isFormatPretty (Game {..}) command =
-  case command of
-     BetActions bets->
-      renderLBS (def {rsPretty = isFormatPretty}) document
-
-      where document = Document prologue root epilogue
-            prologue = Prologue [] Nothing []
-            epilogue = []
-            root =
-              Element "postBetOrder"
-                [("xmlns", namespace),
-                 ("marketId", getMarketId marketId),
-                 ("round", pack $ show $ getRound round),
-                 ("currency", currency)] $
-                map (NodeElement . betActionToXMLElement) bets
+formatOdds :: Odds -> Int -> String
+formatOdds (Odds odds) theseDecimalPlaces =
+  formatRational odds theseDecimalPlaces

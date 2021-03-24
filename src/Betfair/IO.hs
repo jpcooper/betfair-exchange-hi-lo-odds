@@ -1,20 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Betfair.IO (Login(Login), buildManagerSettings, getGame, postOrder) where
-
-import Prelude (Bool, IO, Maybe(..), String, ($), error)
+module Betfair.IO (Login(Login),
+                   ProxyChoice(UseProxy, NoProxy),
+                   buildManagerSettings,
+                   getAccount,
+                   getGame,
+                   postOrder) where
 
 import Control.Lens ((^.), (&), (.~))
-import Control.Monad (return)
 import qualified Data.ByteString as Strict (ByteString)
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as Lazy (unpack)
 import Data.CaseInsensitive (CI)
 import Data.Default.Class (def)
-import Data.Either (Either(Left))
-import Data.Eq ((==))
-import Data.Function ((.))
-import Data.List ((++))
 import Data.String (fromString)
 import Data.Text (Text)
 import Network.Connection (ProxySettings(SockSettingsSimple))
@@ -33,6 +31,14 @@ import Network.Wreq (Options,
                      statusCode)
 
 data Login = Login { username :: String, password :: String }
+  deriving Read
+
+data ProxyChoice = UseProxy
+                 | NoProxy
+  deriving Read
+
+accountUrl :: String
+accountUrl = "https://api.games.betfair.com/rest/v1/account/snapshot"
 
 gameUrl :: String
 gameUrl = "https://api.games.betfair.com/rest/v1/channels/1444093/snapshot?selectionsType=CorrectPredictions"
@@ -61,12 +67,21 @@ apiAgentInstance = "d8e8fca2dc0f896fd7cb4cb0031ba249"
 proxySettings :: ProxySettings
 proxySettings = SockSettingsSimple "localhost" 8000
 
-buildManagerSettings :: Bool -> ManagerSettings
-buildManagerSettings useProxy =
-  mkManagerSettings def $
-    if useProxy
-    then Just proxySettings
-    else Nothing
+buildManagerSettings :: ProxyChoice -> ManagerSettings
+buildManagerSettings proxyChoice =
+  mkManagerSettings def $ case proxyChoice of
+    UseProxy ->
+      Just proxySettings
+
+    NoProxy ->
+      Nothing
+
+getAccount :: ManagerSettings -> Login -> IO Lazy.ByteString
+getAccount managerSettings login = do
+  response <- getWith options accountUrl
+  return $ extractSuccessfulBody response
+
+  where options = buildOptions managerSettings $ Just login
 
 getGame :: ManagerSettings -> IO Lazy.ByteString
 getGame managerSettings = do

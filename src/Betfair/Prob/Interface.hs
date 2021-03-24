@@ -7,18 +7,13 @@ module Betfair.Prob.Interface
   , calculateOdds
   ) where
 
-import           Prelude (IO, Int, fromIntegral, map, zip)
-
-import           Control.Monad (return)
-
-import           Data.Function (($))
 import           Data.Ratio ((%))
 
 import           Foreign.C.Types (CULong)
 import           Foreign.Ptr (Ptr)
 import           Foreign.Marshal.Array (peekArray)
 
-import           Betfair.Model.Game (Odds(Odds))
+import           Betfair.Game (Odds(Odds))
 
 foreign import ccall "createProbabilitiesResult" createProbabilitiesResult :: Int -> IO (Ptr CULong)
 
@@ -30,11 +25,15 @@ foreign import ccall "calculateProbabilities" calculateProbabilities :: Ptr CULo
 
 calculateOdds :: Ptr CULong -> Ptr CULong -> Int -> Int -> IO [Odds]
 calculateOdds numeratorsResult denominatorsResult size numberLower =
-  do calculateProbabilities numeratorsResult denominatorsResult size numberLower
-     let lengthOfProbabilities = getLengthOfProbabilities size
-     numeratorsList <- peekArray lengthOfProbabilities numeratorsResult
-     denominatorsList <- peekArray lengthOfProbabilities denominatorsResult
-     return $ createOddsList numeratorsList denominatorsList
+  do appendFile "/tmp/xxx" $ show size ++ " " ++ show numberLower ++ "\n"
+     if size < 1
+     then return []
+     else do
+       calculateProbabilities numeratorsResult denominatorsResult size numberLower
+       let lengthOfProbabilities = getLengthOfProbabilities size
+       numeratorsList <- peekArray lengthOfProbabilities numeratorsResult
+       denominatorsList <- peekArray lengthOfProbabilities denominatorsResult
+       return $ createOddsList numeratorsList denominatorsList
 
      where createOddsList numeratorsList denominatorsList =
              map createOdds $ zip numeratorsList denominatorsList
