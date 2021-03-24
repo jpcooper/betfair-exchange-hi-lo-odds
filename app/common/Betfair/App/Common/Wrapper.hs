@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Betfair.App.Common.Wrapper (getOdds) where
 
 import Prelude (IO, Int, (==))
@@ -5,7 +7,7 @@ import Prelude (IO, Int, (==))
 import Control.Monad (return)
 import Data.Function (($))
 
-import Betfair.Model.Game
+import Betfair.Game
   ( Game(Game)
   , Odds(Odds)
   , marketStatus

@@ -1,4 +1,6 @@
+#include <assert.h>
 #include <stdlib.h>
+
 #include "prob.h"
 #include "gmp.h"
 
@@ -505,10 +507,32 @@ static void calculatePermutations(long* permutations, int size) {
   }
 }
 
-void calculateProbabilities(unsigned long int* numeratorsResult,
-                            unsigned long int* denominatorsResult,
-                            int size,
-                            int numberLower) {
+void calculateProbabilitiesSizeTwoOrLess (unsigned long int* numeratorsResult,
+                                          unsigned long int* denominatorsResult,
+                                          int size,
+                                          int numberLower) {
+  assert(size <= 2);
+
+  if (size == 1) {
+    numeratorsResult[0] = 1;
+    denominatorsResult[0] = 1;
+  } else if (size == 2) {
+    if (numberLower == 0 || numberLower == 2) {
+      numeratorsResult[0] = 1;
+      denominatorsResult[0] = 1;
+    } else {
+      numeratorsResult[0] = 1;
+      denominatorsResult[0] = 2;
+    }
+  }
+}
+
+void calculateProbabilitiesSizeThreeOrGreater (unsigned long int* numeratorsResult,
+                                               unsigned long int* denominatorsResult,
+                                               int size,
+                                               int numberLower) {
+  assert(size > 2);
+
   int** matrix = createMatrix(size);
   mpq_t* probabilities = createProbabilities(size);
   long* permutations = createPermutations(size);
@@ -525,4 +549,25 @@ void calculateProbabilities(unsigned long int* numeratorsResult,
   free(matrix);
   freeProbabilities(probabilities, size);
   free(permutations);
+}
+
+void calculateProbabilities(unsigned long int* numeratorsResult,
+                            unsigned long int* denominatorsResult,
+                            int size,
+                            int numberLower) {
+  assert(size >= 0);
+  assert(numberLower >= 0);
+  assert(numberLower <= size);
+
+  if (size <= 2) {
+    calculateProbabilitiesSizeTwoOrLess(numeratorsResult,
+                                        denominatorsResult,
+                                        size,
+                                        numberLower);
+  } else {
+    calculateProbabilitiesSizeThreeOrGreater(numeratorsResult,
+                                             denominatorsResult,
+                                             size,
+                                             numberLower);
+  }
 }

@@ -1,26 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Betfair.Logging (addToLog) where
+module Betfair.Logging (addToLog, logGameResponse, responsesSeparator) where
 
-import           Prelude (FilePath, String, IO, (++), show)
+import           Prelude hiding (appendFile)
 
-import           Data.ByteString.Lazy (ByteString, appendFile, writeFile)
-import qualified Data.ByteString.Lazy as ByteString (intercalate)
-import           Data.Function (($))
-import qualified Data.List as List (intercalate)
-import           Data.String (IsString(fromString))
-import           Data.Time (getCurrentTime)
+import           Data.ByteString.Lazy (ByteString,
+                                       append,
+                                       appendFile,
+                                       fromStrict,
+                                       intercalate)
+import           Data.ByteString.Lazy.Char8 (pack)
+import qualified Data.ByteString as Strict (ByteString)
 import           System.FilePath.Posix ((</>))
-import           System.IO.Temp (emptyTempFile)
 
-import           Betfair.Model.Game (Game, Odds)
+import           Betfair.Game (Game, Odds)
+import           Betfair.Strategy (ResponseBetOrder)
 
 addToLog :: FilePath
          -> ByteString
          -> Game
          -> [Odds]
          -> String
-         -> [ByteString]
+         -> [ResponseBetOrder]
          -> IO ()
 addToLog
   logDirectory
@@ -28,23 +29,28 @@ addToLog
   game
   odds
   formattedProbabilities
-  commandRunResults =
-  do responsePath <- getResponsePath
-     writeFile responsePath gameResponse
-     appendFile (logDirectory </> logFile) $ logLine responsePath
+  betOrderRunResults =
+  do appendFile (logDirectory </> logFile) logLine
 
-  where logLine responsePath =
-          ByteString.intercalate "\n\n"
-            ([ fromString responsePath
-             , gameResponse
-             , fromString $ show game
-             , fromString $ show odds
-             , fromString formattedProbabilities] ++
-             commandRunResults ++
+  where logLine =
+          intercalate "\n\n"
+            ([ gameResponse
+             , pack $ show game
+             , pack $ show odds
+             , pack formattedProbabilities] ++
+             map (pack . show) betOrderRunResults ++
              [separator])
         separator = "---\n\n"
         logFile = "log"
-        getResponsePath =
-          do time <- getCurrentTime
-             let fileTemplate = List.intercalate "-" ["response", show time]
-             emptyTempFile logDirectory fileTemplate
+
+logGameResponse :: FilePath
+                -> ByteString
+                -> IO ()
+logGameResponse logDirectory gameResponse =
+  appendFile (logDirectory </> responsesFile) $
+       append gameResponse $ fromStrict responsesSeparator
+
+  where responsesFile = "responses"
+
+responsesSeparator :: Strict.ByteString
+responsesSeparator = "\r\n"

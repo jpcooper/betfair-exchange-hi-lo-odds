@@ -1,4 +1,6 @@
-module Betfair.App.Common.Formatting (formatCommands, formatGameAndOdds) where
+{-# LANGUAGE RecordWildCards #-}
+
+module Betfair.App.Common.Formatting (formatBetOrders, formatGameAndOdds) where
 
 import Prelude (Bool(True),
                 Int,
@@ -18,24 +20,22 @@ import Data.List ((++),
                   map,
                   unlines)
 import Data.Maybe (listToMaybe)
-import Data.Vector (toList)
 import Text.Layout.Table (column, expand, left, gridString)
 import Text.Layout.Table.Spec.AlignSpec (charAlign)
 
-import Betfair.Controller.Common (calculateMargin, zipSelectionsAndOdds)
-import Betfair.Controller.Controller (Command)
-import Betfair.Model.Game
+import Betfair.Strategy (BetOrder, calculateMargin, zipSelectionsAndOdds)
+import Betfair.Game
   ( Amount
   , Game(Game)
   , Odds
   , OddsAmount(OddsAmount)
   , Selection(Selection)
   , board
-  , formatOdds
   , selections
   , marketStatus
   )
-import Betfair.Model.Game.Parsing (formatCommand)
+import Betfair.Game.Serialisation (formatOdds)
+import Betfair.Strategy.Serialisation (formatBetOrder)
 
 decimalPlacesRealOdds :: Int
 decimalPlacesRealOdds = 3
@@ -48,7 +48,7 @@ formatGameAndOdds maxLoss Game {..} odds =
   unlines [show marketStatus, "\n", gridString (replicate (length header) colSpec) (header : rows)]
 
   where colSpec = column expand left (charAlign '.') def
-        selectionsAndOdds = zipSelectionsAndOdds (toList selections) odds
+        selectionsAndOdds = zipSelectionsAndOdds selections odds
         rows = map (\(s, o) -> formatSelectionAndOdds maxLoss s o) selectionsAndOdds
 
 formatSelectionAndOdds :: Amount -> Selection -> Odds -> [String]
@@ -67,8 +67,8 @@ formatSelectionAndOdds maxLoss selection odds =
           calculateMargin maxLoss odds <$> backOdds
         formatMargin = maybe "X" show
 
-formatCommands :: Game -> [Command] -> String
-formatCommands game commands =
-  unlines $ map (Lazy.unpack . formatCommand isFormatPretty game) commands
+formatBetOrders :: [BetOrder] -> String
+formatBetOrders commands =
+  unlines $ map (Lazy.unpack . formatBetOrder isFormatPretty) commands
 
   where isFormatPretty = True

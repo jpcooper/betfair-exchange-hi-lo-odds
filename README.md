@@ -51,11 +51,8 @@ whether an exact solution was possible.
 
 You might look at the game for a few minutes and think that this
 method is blindingly obvious. In that case, you are most probably
-smarter than me. See [How to interview
-engineers](https://defmacro.substack.com/p/how-to-interview-engineers)
-by Slava Akhmechet. Either way, what follows is a fun study in
-discrete probability and its application towards potentially making
-money.
+smarter than me. Either way, what follows is a fun study in discrete
+probability and its application towards potentially making money.
 
 ### The Algorithm
 
@@ -184,7 +181,7 @@ to apply a dynamic algorithm to compute the odds in polynomial time
 and space relative to the number of cards left in the deck. As I said,
 the full explanation is in [prob.c](c/prob.c). I hope the explanation
 and implementation make sense, do not contain bugs and are
-sufficient. Email me if not (details at the bottom).
+sufficient. Email me if not (details in profile).
 
 Without diving any further into the workings of this algorithm, let's
 instead look at its potential application towards making money on
@@ -211,11 +208,7 @@ C FFI that isn't too difficult to use, so why not?
 
 I am also convinced that speed is the only way to make money with this
 game, for reasons that will become apparent later, so C could turn out
-to be the better initial solution in this regard. Because I am banned
-from using Betfair and their developers' API, it is impossible for me
-to know the full effect of speed on profitability, so I have left
-optimising for speed as future work. For all I know, there are people
-with ASICs playing this game.
+to be the better initial solution in this regard.
 
 You can run this application by first [installing
 stack](https://docs.haskellstack.org/en/stable/install_and_upgrade/). And
@@ -372,8 +365,3 @@ the following hypotheses and conclusions:
    compute the odds and get bets based on those odds to Betfair's
    servers. This is where having a polynomial time and space method of
    computing the odds comes in handy.
-
-## Further Work
-
-After building this initial prototype in Haskell and C, I'm now
-looking at building an automated betting system for this game in C++.

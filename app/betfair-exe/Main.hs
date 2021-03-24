@@ -1,33 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
-import           Prelude (Bool(False),
-                          IO,
-                          FilePath,
-                          Integer,
-                          String,
-                          (++),
-                          (>>=),
-                          (<),
-                          (||),
-                          (-),
-                          div,
-                          error,
-                          max,
-                          read,
-                          fromIntegral,
-                          show)
+import           Prelude hiding (getContents)
 
 import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever, mapM, return)
+import           Control.Lens
+import           Control.Monad (forM_)
 import           Control.Monad.IO.Class (liftIO)
-import           Control.Monad.State.Lazy (StateT, lift, evalStateT)
+import           Control.Monad.State.Lazy (StateT, gets, lift, evalStateT)
 import           Control.Monad.IO.Class (MonadIO)
+import           Data.Proxy (Proxy(Proxy))
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
-import           Data.Function (($))
-import           Data.List (length, maximum, map, lines)
+import           Data.ByteString.Lazy (getContents)
+import           Data.ByteString.Lazy.Search (split)
+import           System.CPUTime (getCPUTime)
+import           System.Environment (getArgs)
+import           System.Directory (doesDirectoryExist)
 import           UI.NCurses
   ( Curses
   , Update
@@ -43,51 +34,98 @@ import           UI.NCurses
   , setCursorMode
   )
 import qualified UI.NCurses as NCurses (drawString)
-import           Network.HTTP.Client (ManagerSettings)
-import           System.CPUTime (getCPUTime)
-import           System.Environment (getArgs)
-import           System.Directory (doesDirectoryExist)
 
-import           Betfair.App.Common (maxLoss)
-import           Betfair.App.Common.Formatting (formatCommands, formatGameAndOdds)
+import           Betfair.AccountManager
+import qualified Betfair.AccountManager.Betfair as AccountManager (Betfair(..))
+import           Betfair.App.Common (maxLoss, minBet)
+import           Betfair.App.Common.Formatting (formatBetOrders, formatGameAndOdds)
 import           Betfair.App.Common.Wrapper (getOdds)
-import           Betfair.Controller.Controller (Command(BetActions))
-import           Betfair.Controller.Dumb (DumbState, dumb, emptyDumbState)
-import qualified Betfair.Controller.Dumb as Dumb (Configuration(..))
-import           Betfair.IO (Login(Login),
+import           Betfair.Serialisation (formatRational)
+import           Betfair.Strategy (Account(balance),
+                                   buildGameRepresentation)
+import           Betfair.Strategy.Dumb (dumb)
+import qualified Betfair.Strategy.Dumb as Dumb (Configuration(..),
+                                                State,
+                                                emptyState)
+import           Betfair.IO (Login,
+                             ProxyChoice,
                              buildManagerSettings,
-                             getGame,
-                             postOrder)
-import           Betfair.Logging (addToLog)
-import           Betfair.Model.Game (Game)
-import           Betfair.Model.Game.Parsing (parseGame, formatCommand)
+                             getGame)
+import           Betfair.Logging (addToLog, logGameResponse, responsesSeparator)
+import           Betfair.Game (Amount(..))
+import           Betfair.Game.Serialisation (parseGame)
 
 picosecondsInMilliseconds :: Integer
 picosecondsInMilliseconds = 1000000000
 
-picosecondsInNanoseconds :: Integer
-picosecondsInNanoseconds = 1000
+picosecondsInMicroseconds :: Integer
+picosecondsInMicroseconds = 1000000
 
 dumbConfiguration :: Dumb.Configuration
-dumbConfiguration = Dumb.Configuration maxLoss
+dumbConfiguration = Dumb.Configuration maxLoss minBet
+
+startBalance :: Amount
+startBalance = Amount 100
+
+data State = State {
+  _dumbState :: Dumb.State,
+  -- _backtesterState :: Backtester.State,
+  _account :: Account}
+
+makeLenses ''State
+
+data SourceChoice = Internet Login ProxyChoice
+                  | FilesFromStdin
+  deriving Read
 
 main :: IO ()
 main = do
+  (logDirectory, sourceChoice) <- getConfiguration
+  gameList <- getGameList sourceChoice
+  let thisAccountManager = accountManager sourceChoice
   runCurses $ do
     _ <- setCursorMode CursorInvisible
-    evalStateT run emptyDumbState
+    startAccount <- getAccount Proxy thisAccountManager
+    evalStateT (run logDirectory gameList thisAccountManager) $ buildState startAccount
 
-  where run = do
-          (logDirectory, login, useProxy) <- liftIO getConfiguration
-          let managerSettings = buildManagerSettings useProxy
-          forever $ do
-            (displayDuration, _) <- timePicoseconds $
-              displayOdds logDirectory login managerSettings
-            let displayDurationInNanoseconds =
-                  div displayDuration picosecondsInNanoseconds
-            liftIO $
-              threadDelay $
-              max 0 (1000000 - fromIntegral displayDurationInNanoseconds)
+  where run logDirectory gameList thisAccountManager =
+          forM_ gameList $ \game -> do
+            throttle $ displayOdds logDirectory thisAccountManager game
+
+        accountManager sourceChoice = case sourceChoice of
+          Internet login proxyChoice ->
+            AccountManager.Betfair (buildManagerSettings proxyChoice) login
+
+          _ ->
+            error "Internet source only."
+
+throttle :: MonadIO m => m () -> m ()
+throttle action = do
+  (runDuration, _) <- timePicoseconds action
+  let runDurationInMicroseconds = div runDuration picosecondsInMicroseconds
+  liftIO $ threadDelay $
+    max 0 (1000000 - fromIntegral runDurationInMicroseconds)
+
+getGameList :: SourceChoice -> IO [IO Lazy.ByteString]
+getGameList sourceChoice = case sourceChoice of
+  Internet _ proxyChoice ->
+    internetGameList proxyChoice
+
+  FilesFromStdin ->
+    stdinGameList
+
+  where internetGameList proxyChoice =
+          return $ repeat $ getGame managerSettings
+
+          where managerSettings = buildManagerSettings proxyChoice
+
+        stdinGameList =
+          map return <$> split responsesSeparator <$> getContents
+
+buildState :: Account -> State
+buildState thisAccount =
+  State {_dumbState = Dumb.emptyState,
+         _account = thisAccount}
 
 timePicoseconds :: MonadIO m => m a -> m (Integer, a)
 timePicoseconds action = do
@@ -96,74 +134,77 @@ timePicoseconds action = do
   end <- liftIO $ getCPUTime
   return (end - start, result)
 
-getConfiguration :: IO (FilePath, Login, Bool)
+getConfiguration :: IO (FilePath, SourceChoice)
 getConfiguration = getArgs >>= handle
-  where handle [logDirectory, username, password, useProxy] = do
+  where handle [logDirectory, sourceChoice] = do
           doesDirectoryExistResult <- doesDirectoryExist logDirectory
           if doesDirectoryExistResult
-          then return $ (logDirectory, Login username password, read useProxy)
+          then return $ (logDirectory, read sourceChoice)
           else error "Given log directory does not exist."
         handle _ =
           error "Incorrect number of command line arguments."
 
-runCommands :: Login -> ManagerSettings -> Game -> [Command] -> IO [Lazy.ByteString]
-runCommands login managerSettings game commands =
-  mapM executeCommand commands
-
-  where executeCommand command@(BetActions _) =
-          postOrder managerSettings login $ formatCommand isFormatPretty game command
-
-          where isFormatPretty = False
-
 displayOdds :: FilePath
-            -> Login
-            -> ManagerSettings
-            -> StateT DumbState Curses ()
-displayOdds logDirectory login managerSettings =
+            -> AccountManager.Betfair
+            -> IO Lazy.ByteString
+            -> StateT State Curses ()
+displayOdds logDirectory accountManager gameAction =
   do (getResponseDuration, gameResponse) <-
-       liftIO $ timePicoseconds $ getGame managerSettings
+       liftIO $ timePicoseconds $ gameAction
+     liftIO $ logGameResponse logDirectory gameResponse
      let game = parseGame gameResponse
+     liftIO $ processGame Proxy accountManager game
      odds <- liftIO $ getOdds game
-     commands <- dumb dumbConfiguration game odds
-     commandRunResults <- liftIO $ runCommands login managerSettings game commands
-     stringToDraw <- liftIO $
-       getStringToDraw
-         gameResponse
-         game
-         odds
-         commands
-         commandRunResults
-         getResponseDuration
-     let update = drawString stringToDraw
-     window <- lift defaultWindow
-     _ <- lift $ updateWindow window update
-     lift render
+     thisAccount <- use account
+     let gameRepresentation = buildGameRepresentation game
+     betOrders <-
+       zoom dumbState $ dumb dumbConfiguration thisAccount gameRepresentation odds
+     betOrderRunResults <- mapM (processBetOrder Proxy accountManager game) betOrders
+     account <~ getAccount Proxy accountManager
+     currentBalance <- gets (getAmount . balance . _account)
+
+     let stringToDraw =
+           getStringToDraw
+             game
+             odds
+             betOrders
+             getResponseDuration
+             currentBalance
+
+     liftIO $ addToLog
+           logDirectory
+           gameResponse
+           game
+           odds
+           stringToDraw
+           betOrderRunResults
+
+     updateWithString stringToDraw
 
   where getStringToDraw
-          gameResponse
           game
           odds
-          commands
-          commandRunResults
-          getResponseDuration =
+          betOrders
+          getResponseDuration
+          currentBalance = do
 
-          do let formattedOdds = formatGameAndOdds maxLoss game odds
-             let formattedCommands = formatCommands game commands
-             let formattedGetResponseDuration =
-                   show (div getResponseDuration picosecondsInMilliseconds)
-             let stringToDraw =
-                   formattedOdds ++ "\n\n" ++
-                   formattedCommands ++ "\n\n" ++
-                   formattedGetResponseDuration
-             liftIO $ addToLog
-               logDirectory
-               gameResponse
-               game
-               odds
-               stringToDraw
-               commandRunResults
+          let formattedOdds = formatGameAndOdds maxLoss game odds
+          let formattedBetOrders = formatBetOrders betOrders
+          let formattedGetResponseDuration =
+                show (div getResponseDuration picosecondsInMilliseconds)
+          let formattedBalance = formatRational currentBalance 2
+          let stringToDraw =
+                formattedOdds ++ "\n\n" ++
+                formattedBetOrders ++ "\n\n" ++
+                formattedGetResponseDuration ++ "    " ++ formattedBalance
 
-             return stringToDraw
+          stringToDraw
+
+        updateWithString stringToDraw = do
+          let update = drawString stringToDraw
+          window <- lift defaultWindow
+          _ <- lift $ updateWindow window update
+          lift render
 
 drawString :: String -> Update ()
 drawString string =

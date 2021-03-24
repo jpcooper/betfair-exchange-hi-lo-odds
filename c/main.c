@@ -5,10 +5,11 @@
 
 #define MAX_SIZE 13
 
-void printOdds(double probability);
+void printOdds(unsigned long int numerator, unsigned long int denominator);
 
 int main(void) {
-  double* probabilitiesResult = createProbabilitiesResult(MAX_SIZE);
+  unsigned long int * numeratorsResult = createProbabilitiesResult(MAX_SIZE);
+  unsigned long int * denominatorsResult = createProbabilitiesResult(MAX_SIZE);
 
   int size;
   int numberLower;
@@ -18,16 +19,16 @@ int main(void) {
 
     int lengthOfProbabilities = getLengthOfProbabilities(size);
 
-    calculateProbabilities(probabilitiesResult, size, numberLower);
+    calculateProbabilities(numeratorsResult, denominatorsResult, size, numberLower);
 
     for (int i = 0; i < lengthOfProbabilities; i++) {
-      printOdds(probabilitiesResult[i]);
+      printOdds(numeratorsResult[i], denominatorsResult[i]);
     }
   }
 
   return 0;
 }
 
-void printOdds(double probability) {
-  printf("%.3f -- %.3f\n", probability, 1.0 / probability);
+void printOdds(unsigned long int numerator, unsigned long int denominator) {
+  printf("%.3f -- %.3f\n", (double) numerator / denominator, (double) denominator / numerator);
 }

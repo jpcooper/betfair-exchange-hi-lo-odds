@@ -1,10 +1,6 @@
 name:                betfair-exchange-hi-lo-odds
 version:             0.1.0.0
 
-default-extensions:
-  - NoImplicitPrelude
-  - RecordWildCards
-
 ghc-options:
   - -Wall
   - -Werror
@@ -22,8 +18,10 @@ dependencies:
   - http-client
   - http-client-tls
   - lens
+  - lens-family-core
   - mtl
   - ncurses
+  - stringsearch
   - table-layout
   - text
   - transformers
